@@ -1,30 +1,82 @@
 import { Router } from "express";
 import { sample_users } from "../data";
 import jwt from "jsonwebtoken";
+import asyncHandler from 'express-async-handler';
+import { User, userModel } from "../models/user.model";
+import { HTTP_BAD_REQUEST } from "../configs/constants/http_status";
+import bcrypt from 'bcryptjs';
 
 const router = Router();
 
-router.post("/login",(req,res) =>{
-    const body = req.body;
-    const {email,password} = req.body;
-    const user = sample_users.find(user => user.email === email &&
-        user.password === password)
-
-        if(user){
-            res.send(generateTokenResponse(user));
-        }else{
-            res.send(400).send("Username or Password is not valid!")
+router.get("/seed", asyncHandler(
+    async (req,res) =>{
+        const userCount = await userModel.countDocuments();
+        if(userCount>0){
+            res.send("Seed is Already done!")
+            return;
         }
-})
+        await userModel.create(sample_users);
+        res.send("Seed is Done!")
+    }
+))
 
-const generateTokenResponse =(user:any) =>{
-    const token = jwt.sign({
-        email:user.email, isAdmin:user.isAdmin
-    },"Some Random Text",{expiresIn:"30d"});
+router.post("/login",asyncHandler(
+    async (req, res) => {
+      const {email, password} = req.body;
+      const user = await userModel.findOne({email});
+  
+       if(user && (await bcrypt.compare(password,user.password))) {
+        res.send(generateTokenResponse(user));
+       }
+       else{
+         res.status(HTTP_BAD_REQUEST).send("Username or password is invalid!");
+       }
+  
+    }
+  ))
+
+router.post('/register',asyncHandler(
+    async(req,res) =>{
+        const {name,email,password,address} = req.body;
+        const user = await userModel.findOne({email});
+        if(user){
+         res.status(HTTP_BAD_REQUEST).send("User is already exits,please login!");
+         return;
+        }
+        const encryptedPassword = await bcrypt.hash(password,10);
+
+        const newUser:User = {
+            id:'',
+            name,
+            email: email.toLowerCase(),
+            password: encryptedPassword,
+            address,
+            isAdmin:false
+        }
+
+        const dbUser = await userModel.create(newUser);
+        res.send(generateTokenResponse(dbUser));
+    }
+))
+
+const generateTokenResponse = (user : User) => {
+    console.log('user',user);
     
-user.token = token;
-return user;
+    const token = jwt.sign({
+      id:user.id,email:user.email, isAdmin: user.isAdmin
+    },'jsonsigntokenuser',{
+      expiresIn:"1d"
+    });
 
-}
+    console.log('token',token);
 
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      address: user.address,
+      isAdmin: user.isAdmin,
+      token: token
+    };
+  }
 export default router;
